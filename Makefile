@@ -11,7 +11,10 @@ all: format vet megacheck build test
 
 build:
 	@echo ">> building binaries"
-	GOBIN=$(BUILD_DIR) $(GO) install -v -ldflags '-X main.Version=$(VERSION)'
+	$(GO) build -v -ldflags '-X main.Version=$(VERSION)'
+
+build-amd64:
+	make build GOARCH=amd64 GOOS=linux
 
 clean:
 	rm -R $(BUILD_DIR)/* || true

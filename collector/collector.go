@@ -18,6 +18,7 @@ type metric struct {
 	metricsname string
 	value       float64
 	unit        string
+	addr        string
 }
 
 // Exporter implements the prometheus.Collector interface. It exposes the metrics
@@ -26,11 +27,6 @@ type Exporter struct {
 	IPMIBinary string
 
 	namespace string
-}
-
-var rawSensors = [][]string{
-	{"InputPowerPSU1", " raw 0x06 0x52 0x07 0x78 0x01 0x97", "W", "enabled"},
-	{"InputPowerPSU2", " raw 0x06 0x52 0x07 0x7a 0x01 0x97", "W", "enabled"},
 }
 
 // NewExporter instantiates a new ipmi Exporter.
@@ -161,8 +157,6 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		log.Errorln(err)
 	}
 
-	psRegex := regexp.MustCompile("PS(.*) Status")
-
 	for _, res := range convertedOutput {
 		push := func(m *prometheus.Desc) {
 			ch <- prometheus.MustNewConstMetric(m, prometheus.GaugeValue, res.value, res.metricsname)
@@ -175,35 +169,52 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		case "rpm":
 			push(fanspeed)
 		case "watts":
-			push(powersupply)
+			if res.metricsname == "Pwr Consumption" {
+				ch <- prometheus.MustNewConstMetric(powerconsumption, prometheus.GaugeValue, res.value)
+			} else {
+				push(powersupply)
+			}
 		case "amps":
 			push(current)
 		}
 
-		if matches := psRegex.MatchString(res.metricsname); matches {
+		if matches, err := regexp.MatchString("PS.* PG Fail", res.metricsname); matches && err == nil {
+			// It's probably a Dell! These flag PSU failure rather than success. :)
+			if res.value == 0 {
+				res.value = 1
+			} else {
+				res.value = 0
+			}
+			// And we should rewrite the label so it's less confusing once the value
+			// has been inverted.
+			res.metricsname = strings.Split(res.metricsname, " ")[0]
+			push(powersupply)
+		}
+
+		if matches, err := regexp.MatchString("PS.* Status", res.metricsname); matches && err == nil {
 			push(powersupply)
 		} else if strings.HasSuffix(res.metricsname, "Chassis Intru") {
 			ch <- prometheus.MustNewConstMetric(intrusion, prometheus.GaugeValue, res.value)
 		}
 	}
 
-	e.collectRaws(ch)
+	// e.collectRaws(ch)
 }
 
 // Collect some Supermicro X8-specific metrics with raw commands
 func (e *Exporter) collectRaws(ch chan<- prometheus.Metric) {
+	commands := [][]string{
+		{"InputPowerPSU1", " raw 0x06 0x52 0x07 0x78 0x01 0x97", "W"},
+		{"InputPowerPSU2", " raw 0x06 0x52 0x07 0x7a 0x01 0x97", "W"},
+	}
 	results := [][]string{}
-	for i, command := range rawSensors {
-		if command[3] == "enabled" {
-			output, err := ipmiOutput(e.IPMIBinary + command[1])
-			if err != nil {
-				log.Infof("Error detected on quering %v. Disabling this sensor.", command[1])
-				rawSensors[i][3] = "disabled"
-				log.Errorln(err)
-			}
-
-			results = append(results, []string{command[0], string(output), command[2]})
+	for _, command := range commands {
+		output, err := ipmiOutput(e.IPMIBinary + command[1])
+		if err != nil {
+			log.Errorln(err)
 		}
+
+		results = append(results, []string{command[0], string(output), command[2]})
 	}
 
 	convertedRawOutput, err := convertRawOutput(results)

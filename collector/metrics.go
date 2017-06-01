@@ -40,6 +40,13 @@ var (
 		nil,
 	)
 
+	powerconsumption = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "power_consumption_watts"),
+		"Contains server power consumption in watts",
+		nil,
+		nil,
+	)
+
 	powersupply = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "power_supply_status"),
 		"Indicates if a power supply is operational",
