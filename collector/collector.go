@@ -70,6 +70,12 @@ func convertOutput(result [][]string) (metrics []metric, err error) {
 		for n := range res {
 			res[n] = strings.TrimSpace(res[n])
 		}
+		if matches, err := regexp.MatchString("PS.* PG Fail", res[0]); matches && err == nil {
+			// It's probably a Dell! These flag PSU failure rather than success. :)
+			if res[1] == "na" {
+				res[1] = "1"
+			}
+		}
 		value, err = convertValue(res[1], res[2])
 		if err != nil {
 			log.Errorf("could not parse ipmi output: %s", err)
